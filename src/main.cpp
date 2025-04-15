@@ -4,7 +4,7 @@
 
 ezButton sensor2(9);   // create ezButton object that attach to pin 6;
 ezButton sensor1(8);   // create ezButton object that attach to pin 7;
-ezButton btnStart(10); // create ezButton object that attach to pin 7;
+ezButton btnStart(13); // create ezButton object that attach to pin 7;
 
 bool sensor1State = false;
 bool sensor2State = false;
@@ -37,7 +37,7 @@ char *secondsToHHMMSS(int total_seconds)
   sprintf(hhmmss_str, "%02d%02d%02d", hours, minutes, seconds);
   return hhmmss_str;
 }
-int parametersTimer[6] = {1, 1, 1, 1, 1};
+int parametersTimer[6] = {8, 8, 8, 5, 60};
 
 void setTimers()
 {
@@ -46,7 +46,7 @@ void setTimers()
   closeMetalArmTimer.setTimer(secondsToHHMMSS(parametersTimer[2]));
   dumpTimer.setTimer(secondsToHHMMSS(parametersTimer[3]));
   heaterTimer.setTimer(secondsToHHMMSS(parametersTimer[4]));
-  grinder.setTimer(secondsToHHMMSS(parametersTimer[5]));
+  grinder.setTimer(secondsToHHMMSS(60));
 }
 
 void runSensors()
@@ -55,9 +55,13 @@ void runSensors()
   sensor2.loop();
   btnStart.loop();
 
-  sensor1State = sensor1.getState();
-  sensor2State = sensor2.getState();
+  sensor1State = !sensor1.getState();
+  sensor2State = !sensor2.getState();
   btnStartState = btnStart.getState();
+  // Serial.print("Sensor 1: ");
+  // Serial.println(sensor1State);
+  // Serial.print("Sensor 2: ");
+  // Serial.println(sensor2State);
 }
 
 void stopAll()
@@ -75,7 +79,7 @@ void stopAll()
   dumpTimer.stop();
   heaterTimer.stop();
 }
-
+bool runAutoFlag = false;
 int runAutoStatus = 0;
 /*
 runAutoStatus
@@ -104,6 +108,7 @@ void runAuto()
       conveyor.relayOff();
       openMetalArmTimer.start();
       runAutoStatus = 2;
+      Serial.println("Metal Sensor Triggered");
     }
 
     if (sensor2State == true)
@@ -111,6 +116,7 @@ void runAuto()
       conveyor.relayOff();
       dumpTimer.start();
       runAutoStatus = 5;
+      Serial.println("Material Sensor Triggered");
     }
 
     conveyor.relayOn();
@@ -123,9 +129,11 @@ void runAuto()
     {
       runAutoStatus = 3;
       dumpMetalTimer.start();
+      Serial.println("Open Metal Arm Done");
     }
     else
     {
+      conveyor.relayOff();
       linearArmMetal.relayOn();
     }
     break;
@@ -134,12 +142,14 @@ void runAuto()
     dumpMetalTimer.run();
     if (dumpMetalTimer.isTimerCompleted() == true)
     {
+      Serial.println("Dump Metal Done");
       conveyor.relayOff();
       closeMetalArmTimer.start();
       runAutoStatus = 4;
     }
     else
     {
+
       conveyor.relayOn();
     }
     break;
@@ -148,6 +158,7 @@ void runAuto()
     closeMetalArmTimer.run();
     if (closeMetalArmTimer.isTimerCompleted() == true)
     {
+      Serial.println("Metal Arm Closing Done");
       runAutoStatus = 1;
     }
     else
@@ -160,7 +171,11 @@ void runAuto()
     dumpTimer.run();
     if (dumpTimer.isTimerCompleted() == true)
     {
+      Serial.println("Move to Heater Done");
+      conveyor.relayOff();
+      heaterTimer.start();
       runAutoStatus = 6;
+      Serial.println("Heater Start");
     }
     else
     {
@@ -172,7 +187,10 @@ void runAuto()
     heaterTimer.run();
     if (heaterTimer.isTimerCompleted() == true)
     {
+      Serial.println("Heater Done");
+      grinder.start();
       runAutoStatus = 7;
+      Serial.println("Grinder Start");
     }
     else
     {
@@ -184,6 +202,7 @@ void runAuto()
     grinder.run();
     if (grinder.isTimerCompleted() == true)
     {
+      Serial.println("Grinder Done");
       runAutoStatus = 8;
     }
     else
@@ -194,13 +213,15 @@ void runAuto()
 
   case 8:
     stopAll();
+    runAutoFlag = false;
+    runAutoStatus = 0;
     break;
+
   default:
     break;
   }
 }
 
-bool runAutoFlag = false;
 void readButtons()
 {
   if (runAutoFlag == true)
@@ -228,13 +249,65 @@ void setup()
   sensor2.setDebounceTime(50);
   sensor1.setDebounceTime(50);
   btnStart.setDebounceTime(100);
+  Serial.begin(9600);
+}
+unsigned long currentMillisRunAuto;
+unsigned long previousMillisRunAuto;
+unsigned long intervalRunAuto = 1000;
+
+void printRunAutoStatus()
+{
+  Serial.print("Run Auto Flag : ");
+  Serial.println(runAutoFlag);
+  Serial.print("Run Auto Status : ");
+  Serial.println(runAutoStatus);
+  switch (runAutoStatus)
+  {
+  case 1:
+    Serial.println("Waiting for Sensor");
+    break;
+  case 2:
+    Serial.print("Open Metal Arm - ");
+    Serial.println(openMetalArmTimer.getTimeRemaining());
+    break;
+  case 3:
+    Serial.print("Dump Metal - ");
+    Serial.println(dumpMetalTimer.getTimeRemaining());
+    break;
+  case 4:
+    Serial.print("Close Metal Arm- ");
+    Serial.println(closeMetalArmTimer.getTimeRemaining());
+    break;
+  case 5:
+    Serial.print("Dump to Heater- ");
+    Serial.println(dumpMetalTimer.getTimeRemaining());
+    break;
+  case 6:
+    Serial.print("Drying - ");
+    Serial.println(heaterTimer.getTimeRemaining());
+    break;
+  case 7:
+    Serial.print("Grinding - ");
+    Serial.println(grinder.getTimeRemaining());
+    break;
+  default:
+    break;
+  }
 }
 
 void loop()
 {
   runSensors();
   readButtons();
-  if(runAutoFlag == true){
+  if (runAutoFlag == true)
+  {
     runAuto();
+  }
+
+  unsigned long currentMillisRunAuto = millis();
+  if (currentMillisRunAuto - previousMillisRunAuto >= intervalRunAuto)
+  {
+    previousMillisRunAuto = currentMillisRunAuto;
+    printRunAutoStatus();
   }
 }
